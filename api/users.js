@@ -1,5 +1,25 @@
-// Share the same user storage
-let users = new Map();
+import fs from 'fs';
+import path from 'path';
+
+const dataFile = '/tmp/chat_data.json';
+
+function readData() {
+    try {
+        const data = fs.readFileSync(dataFile, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        return { messages: [], users: [], lastCleanup: Date.now() };
+    }
+}
+
+function writeData(data) {
+    try {
+        fs.writeFileSync(dataFile, JSON.stringify(data));
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
 
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -13,35 +33,26 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
         try {
             const user = await req.body;
+            const data = readData();
             
-            if (req.query.offline) {
-                // Remove user if they're going offline
-                users.delete(user.id);
-            } else {
-                // Update or add user
-                users.set(user.id, {
+            const userIndex = data.users.findIndex(u => u.id === user.id);
+            
+            if (userIndex === -1) {
+                // Add new user
+                data.users.push({
                     ...user,
                     lastSeen: Date.now()
                 });
+            } else {
+                // Update existing user
+                data.users[userIndex].lastSeen = Date.now();
             }
             
+            writeData(data);
             return res.status(200).json({ success: true });
         } catch (error) {
             return res.status(500).json({ error: 'Failed to update user' });
         }
-    }
-
-    if (req.method === 'GET') {
-        // Clean up old users (2 minutes offline)
-        const now = Date.now();
-        for (let [userId, user] of users.entries()) {
-            if (now - user.lastSeen > 120000) {
-                users.delete(userId);
-            }
-        }
-        
-        const onlineUsers = Array.from(users.keys());
-        return res.status(200).json({ onlineUsers });
     }
 
     return res.status(405).json({ error: 'Method not allowed' });

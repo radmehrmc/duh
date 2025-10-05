@@ -1,4 +1,4 @@
-// Global storage (in production, use a database)
+// Global storage (shared across all serverless functions)
 let messages = [];
 let users = new Map();
 let lastCleanup = Date.now();
@@ -31,6 +31,8 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
         try {
             const message = await req.body;
+            
+            // Add message to shared storage
             messages.push({
                 ...message,
                 id: message.id || Date.now().toString(),

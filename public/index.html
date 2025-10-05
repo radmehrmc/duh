@@ -1,607 +1,253 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Discord Chat - Real Time</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
+<script>
+    let currentUser = null;
+    let messages = [];
+    let onlineUsers = new Set();
+    let lastMessageCheck = 0;
+    let isPolling = false;
 
-        :root {
-            --primary: #5865f2;
-            --dark-bg: #36393f;
-            --server-bg: #202225;
-            --channel-bg: #2f3136;
-            --chat-bg: #36393f;
-            --text-primary: #ffffff;
-            --text-secondary: #b9bbbe;
-        }
-
-        body {
-            background: var(--dark-bg);
-            color: var(--text-primary);
-            height: 100vh;
-            overflow: hidden;
-        }
-
-        .login-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: var(--dark-bg);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
-
-        .login-box {
-            background: var(--channel-bg);
-            padding: 40px;
-            border-radius: 10px;
-            width: 400px;
-            text-align: center;
-        }
-
-        .avatar-selection {
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            margin: 20px 0;
-        }
-
-        .avatar-option {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            cursor: pointer;
-            border: 3px solid transparent;
-            background: var(--dark-bg);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-        }
-
-        .avatar-option.selected {
-            border-color: var(--primary);
-        }
-
-        .login-input {
-            width: 100%;
-            padding: 12px;
-            background: var(--dark-bg);
-            border: none;
-            border-radius: 5px;
-            color: var(--text-primary);
-            margin-bottom: 15px;
-            font-size: 16px;
-        }
-
-        .login-btn {
-            width: 100%;
-            padding: 12px;
-            background: var(--primary);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            font-size: 16px;
-            cursor: pointer;
-            font-weight: 600;
-        }
-
-        .app-container {
-            display: flex;
-            height: 100vh;
-            display: none;
-        }
-
-        .servers-sidebar {
-            width: 70px;
-            background: var(--server-bg);
-            padding: 10px 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .server-icon {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background: var(--channel-bg);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            color: var(--text-secondary);
-        }
-
-        .server-icon.active {
-            background: var(--primary);
-            color: white;
-        }
-
-        .channels-sidebar {
-            width: 240px;
-            background: var(--channel-bg);
-            display: flex;
-            flex-direction: column;
-        }
-
-        .server-header {
-            padding: 15px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            font-weight: bold;
-        }
-
-        .channels-list {
-            padding: 15px;
-            flex: 1;
-        }
-
-        .channel-item {
-            padding: 8px 10px;
-            border-radius: 5px;
-            cursor: pointer;
-            color: var(--text-secondary);
-            margin-bottom: 2px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .channel-item.active {
-            background: rgba(255,255,255,0.1);
-            color: var(--text-primary);
-        }
-
-        .chat-area {
-            flex: 1;
-            background: var(--chat-bg);
-            display: flex;
-            flex-direction: column;
-        }
-
-        .chat-header {
-            padding: 15px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .chat-messages {
-            flex: 1;
-            padding: 20px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-
-        .message {
-            display: flex;
-            gap: 15px;
-            padding: 5px 0;
-        }
-
-        .message-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: var(--primary);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 14px;
-            flex-shrink: 0;
-        }
-
-        .message-content {
-            flex: 1;
-        }
-
-        .message-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 5px;
-        }
-
-        .message-author {
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .message-time {
-            color: var(--text-secondary);
-            font-size: 12px;
-        }
-
-        .message-text {
-            color: var(--text-primary);
-            line-height: 1.4;
-        }
-
-        .chat-input-container {
-            padding: 15px;
-            background: var(--channel-bg);
-        }
-
-        .chat-input-box {
-            background: var(--dark-bg);
-            border-radius: 8px;
-            padding: 10px;
-        }
-
-        .message-input {
-            width: 100%;
-            background: none;
-            border: none;
-            color: var(--text-primary);
-            font-size: 16px;
-            padding: 5px;
-            resize: none;
-            min-height: 20px;
-            max-height: 150px;
-        }
-
-        .send-btn {
-            background: var(--primary);
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: 600;
-            margin-top: 10px;
-        }
-
-        .members-sidebar {
-            width: 240px;
-            background: var(--channel-bg);
-            padding: 15px;
-        }
-
-        .members-title {
-            color: var(--text-secondary);
-            font-size: 12px;
-            font-weight: 600;
-            margin-bottom: 15px;
-            text-transform: uppercase;
-        }
-
-        .member-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 5px 0;
-            color: var(--text-secondary);
-        }
-
-        .member-avatar {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            background: var(--primary);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        .member-status {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #3ba55c;
-        }
-
-        .typing-indicator {
-            color: var(--text-secondary);
-            font-style: italic;
-            padding: 10px;
-            font-size: 14px;
-        }
-    </style>
-</head>
-<body>
-    <div class="login-container" id="loginContainer">
-        <div class="login-box">
-            <h1 style="margin-bottom: 10px;">Discord Chat</h1>
-            <p style="color: var(--text-secondary); margin-bottom: 20px;">Enter your name to start chatting</p>
-            
-            <div class="avatar-selection">
-                <div class="avatar-option selected" data-avatar="👤">👤</div>
-                <div class="avatar-option" data-avatar="😊">😊</div>
-                <div class="avatar-option" data-avatar="🤖">🤖</div>
-                <div class="avatar-option" data-avatar="🎮">🎮</div>
-            </div>
-            
-            <input type="text" class="login-input" id="username" placeholder="Enter your display name">
-            <button class="login-btn" onclick="login()">Join Chat</button>
-        </div>
-    </div>
-
-    <div class="app-container" id="appContainer">
-        <div class="servers-sidebar">
-            <div class="server-icon active">
-                <i class="fas fa-comments"></i>
-            </div>
-        </div>
-
-        <div class="channels-sidebar">
-            <div class="server-header">REAL-TIME CHAT</div>
-            <div class="channels-list">
-                <div class="channel-item active">
-                    <i class="fas fa-hashtag"></i>
-                    <span>general</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="chat-area">
-            <div class="chat-header">
-                <i class="fas fa-hashtag" style="color: var(--text-secondary);"></i>
-                <span>general</span>
-                <span style="color: var(--text-secondary); margin-left: auto; font-size: 12px;">
-                    <span id="onlineCount">1</span> online
-                </span>
-            </div>
-
-            <div class="chat-messages" id="chatMessages">
-                <div style="text-align: center; color: var(--text-secondary); margin-top: 20px;">
-                    Loading messages...
-                </div>
-            </div>
-
-            <div class="chat-input-container">
-                <div class="chat-input-box">
-                    <textarea class="message-input" id="messageInput" placeholder="Type a message..." rows="1"></textarea>
-                    <button class="send-btn" onclick="sendMessage()">
-                        <i class="fas fa-paper-plane"></i> Send Message
-                    </button>
-                </div>
-                <div class="typing-indicator" id="typingIndicator" style="display: none;"></div>
-            </div>
-        </div>
-
-        <div class="members-sidebar">
-            <div class="members-title">online users</div>
-            <div id="onlineMembers">
-                <div class="member-item">
-                    <div class="member-avatar">👤</div>
-                    <div>You</div>
-                    <div class="member-status"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let currentUser = null;
-        let messages = [];
-        let onlineUsers = new Set();
-        let lastMessageCheck = 0;
-
-        // Initialize
-        function init() {
-            document.querySelectorAll('.avatar-option').forEach(option => {
-                option.addEventListener('click', () => {
-                    document.querySelectorAll('.avatar-option').forEach(opt => {
-                        opt.classList.remove('selected');
-                    });
-                    option.classList.add('selected');
+    // Initialize
+    function init() {
+        document.querySelectorAll('.avatar-option').forEach(option => {
+            option.addEventListener('click', () => {
+                document.querySelectorAll('.avatar-option').forEach(opt => {
+                    opt.classList.remove('selected');
                 });
+                option.classList.add('selected');
             });
+        });
 
-            document.getElementById('messageInput').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
-                }
-            });
-
-            // Load any saved user
-            const savedUser = localStorage.getItem('chat_user');
-            if (savedUser) {
-                currentUser = JSON.parse(savedUser);
-                showApp();
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
             }
-        }
+        });
 
-        async function login() {
-            const username = document.getElementById('username').value.trim();
-            const avatar = document.querySelector('.avatar-option.selected').dataset.avatar;
+        // Load any saved user
+        const savedUser = localStorage.getItem('chat_user');
+        if (savedUser) {
+            currentUser = JSON.parse(savedUser);
+            showApp();
+        }
+    }
+
+    async function login() {
+        const username = document.getElementById('username').value.trim();
+        const avatar = document.querySelector('.avatar-option.selected').dataset.avatar;
+        
+        if (username) {
+            currentUser = {
+                name: username,
+                avatar: avatar,
+                id: generateId(),
+                lastSeen: Date.now()
+            };
             
-            if (username) {
-                currentUser = {
-                    name: username,
-                    avatar: avatar,
-                    id: generateId(),
-                    lastSeen: Date.now()
-                };
-                
-                localStorage.setItem('chat_user', JSON.stringify(currentUser));
-                showApp();
-                
-                // Add user to online list
-                await fetch('/api/users', {
+            localStorage.setItem('chat_user', JSON.stringify(currentUser));
+            showApp();
+            
+            // Add user to online list
+            await fetch('/api/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(currentUser)
+            });
+            
+            // Start polling for updates
+            startPolling();
+        }
+    }
+
+    function showApp() {
+        document.getElementById('loginContainer').style.display = 'none';
+        document.getElementById('appContainer').style.display = 'flex';
+        loadMessages();
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById('messageInput');
+        const text = input.value.trim();
+        
+        if (text && currentUser) {
+            const message = {
+                id: generateId(),
+                user: currentUser.name,
+                avatar: currentUser.avatar,
+                text: text,
+                timestamp: Date.now(),
+                userId: currentUser.id
+            };
+
+            try {
+                const response = await fetch('/api/messages', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(currentUser)
+                    body: JSON.stringify(message)
                 });
                 
-                // Start polling for updates
-                startPolling();
-            }
-        }
-
-        function showApp() {
-            document.getElementById('loginContainer').style.display = 'none';
-            document.getElementById('appContainer').style.display = 'flex';
-            loadMessages();
-        }
-
-        async function sendMessage() {
-            const input = document.getElementById('messageInput');
-            const text = input.value.trim();
-            
-            if (text && currentUser) {
-                const message = {
-                    id: generateId(),
-                    user: currentUser.name,
-                    avatar: currentUser.avatar,
-                    text: text,
-                    timestamp: Date.now(),
-                    userId: currentUser.id
-                };
-
-                try {
-                    await fetch('/api/messages', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(message)
-                    });
-                    
+                if (response.ok) {
                     input.value = '';
                     input.style.height = 'auto';
-                } catch (error) {
-                    console.error('Failed to send message:', error);
-                }
-            }
-        }
-
-        async function loadMessages() {
-            try {
-                const response = await fetch('/api/messages');
-                const data = await response.json();
-                messages = data.messages || [];
-                onlineUsers = new Set(data.onlineUsers || []);
-                
-                displayMessages();
-                updateOnlineUsers();
-            } catch (error) {
-                console.error('Failed to load messages:', error);
-            }
-        }
-
-        function displayMessages() {
-            const container = document.getElementById('chatMessages');
-            
-            if (messages.length === 0) {
-                container.innerHTML = '<div style="text-align: center; color: var(--text-secondary); margin-top: 20px;">No messages yet. Start the conversation!</div>';
-                return;
-            }
-            
-            container.innerHTML = '';
-            messages.forEach(message => {
-                addMessageToUI(message);
-            });
-            
-            container.scrollTop = container.scrollHeight;
-        }
-
-        function addMessageToUI(message) {
-            const container = document.getElementById('chatMessages');
-            
-            // Clear welcome message if it exists
-            if (container.children.length === 1 && container.children[0].textContent.includes('Loading')) {
-                container.innerHTML = '';
-            }
-            
-            const messageElement = document.createElement('div');
-            messageElement.className = 'message';
-            
-            const time = new Date(message.timestamp).toLocaleTimeString([], { 
-                hour: '2-digit', minute: '2-digit' 
-            });
-            
-            messageElement.innerHTML = `
-                <div class="message-avatar">${message.avatar}</div>
-                <div class="message-content">
-                    <div class="message-header">
-                        <span class="message-author">${message.user}</span>
-                        <span class="message-time">${time}</span>
-                    </div>
-                    <div class="message-text">${message.text}</div>
-                </div>
-            `;
-            
-            container.appendChild(messageElement);
-            container.scrollTop = container.scrollHeight;
-        }
-
-        function updateOnlineUsers() {
-            const container = document.getElementById('onlineMembers');
-            const countElement = document.getElementById('onlineCount');
-            
-            container.innerHTML = '';
-            countElement.textContent = onlineUsers.size;
-            
-            onlineUsers.forEach(userId => {
-                // In a real app, you'd have user data. For demo, just show IDs
-                const userElement = document.createElement('div');
-                userElement.className = 'member-item';
-                userElement.innerHTML = `
-                    <div class="member-avatar">👤</div>
-                    <div>User ${userId.slice(-4)}</div>
-                    <div class="member-status"></div>
-                `;
-                container.appendChild(userElement);
-            });
-        }
-
-        async function startPolling() {
-            setInterval(async () => {
-                try {
-                    const response = await fetch(`/api/updates?lastCheck=${lastMessageCheck}&userId=${currentUser.id}`);
-                    const data = await response.json();
                     
-                    if (data.newMessages && data.newMessages.length > 0) {
-                        messages.push(...data.newMessages);
-                        data.newMessages.forEach(msg => addMessageToUI(msg));
+                    // Immediately add the message to UI (optimistic update)
+                    addMessageToUI(message);
+                    messages.push(message);
+                }
+            } catch (error) {
+                console.error('Failed to send message:', error);
+            }
+        }
+    }
+
+    async function loadMessages() {
+        try {
+            const response = await fetch('/api/messages');
+            const data = await response.json();
+            messages = data.messages || [];
+            onlineUsers = new Set(data.onlineUsers || []);
+            
+            displayMessages();
+            updateOnlineUsers();
+        } catch (error) {
+            console.error('Failed to load messages:', error);
+        }
+    }
+
+    function displayMessages() {
+        const container = document.getElementById('chatMessages');
+        
+        if (messages.length === 0) {
+            container.innerHTML = '<div style="text-align: center; color: var(--text-secondary); margin-top: 20px;">No messages yet. Start the conversation!</div>';
+            return;
+        }
+        
+        container.innerHTML = '';
+        messages.forEach(message => {
+            addMessageToUI(message);
+        });
+        
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function addMessageToUI(message) {
+        const container = document.getElementById('chatMessages');
+        
+        // Clear welcome message if it exists
+        if (container.children.length === 1 && 
+            (container.children[0].textContent.includes('Loading') || 
+             container.children[0].textContent.includes('No messages'))) {
+            container.innerHTML = '';
+        }
+        
+        const messageElement = document.createElement('div');
+        messageElement.className = 'message';
+        
+        const time = new Date(message.timestamp).toLocaleTimeString([], { 
+            hour: '2-digit', minute: '2-digit' 
+        });
+        
+        messageElement.innerHTML = `
+            <div class="message-avatar">${message.avatar}</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="message-author">${message.user}</span>
+                    <span class="message-time">${time}</span>
+                </div>
+                <div class="message-text">${message.text}</div>
+            </div>
+        `;
+        
+        container.appendChild(messageElement);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function updateOnlineUsers() {
+        const container = document.getElementById('onlineMembers');
+        const countElement = document.getElementById('onlineCount');
+        
+        container.innerHTML = '';
+        countElement.textContent = onlineUsers.size;
+        
+        onlineUsers.forEach(userId => {
+            const userElement = document.createElement('div');
+            userElement.className = 'member-item';
+            userElement.innerHTML = `
+                <div class="member-avatar">👤</div>
+                <div>User ${userId.slice(-4)}</div>
+                <div class="member-status"></div>
+            `;
+            container.appendChild(userElement);
+        });
+    }
+
+    async function startPolling() {
+        if (isPolling) return;
+        isPolling = true;
+        
+        const poll = async () => {
+            if (!currentUser) return;
+            
+            try {
+                const response = await fetch(`/api/updates?lastCheck=${lastMessageCheck}&userId=${currentUser.id}`);
+                const data = await response.json();
+                
+                if (data.newMessages && data.newMessages.length > 0) {
+                    // Only add messages we haven't seen yet
+                    const newMessages = data.newMessages.filter(newMsg => 
+                        !messages.some(existingMsg => existingMsg.id === newMsg.id)
+                    );
+                    
+                    if (newMessages.length > 0) {
+                        newMessages.forEach(msg => {
+                            addMessageToUI(msg);
+                            messages.push(msg);
+                        });
                         lastMessageCheck = Date.now();
                     }
-                    
-                    if (data.onlineUsers) {
-                        onlineUsers = new Set(data.onlineUsers);
-                        updateOnlineUsers();
-                    }
-                } catch (error) {
-                    console.error('Polling error:', error);
                 }
-            }, 2000); // Poll every 2 seconds
-        }
-
-        function generateId() {
-            return Math.random().toString(36).substr(2, 9);
-        }
-
-        // Keep user online
-        setInterval(() => {
-            if (currentUser) {
-                fetch('/api/users', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({...currentUser, lastSeen: Date.now()})
-                });
+                
+                if (data.onlineUsers) {
+                    onlineUsers = new Set(data.onlineUsers);
+                    updateOnlineUsers();
+                }
+            } catch (error) {
+                console.error('Polling error:', error);
             }
-        }, 30000);
+            
+            // Continue polling
+            setTimeout(poll, 1000); // Poll every 1 second for real-time feel
+        };
+        
+        // Start polling
+        poll();
+    }
 
-        window.addEventListener('load', init);
-    </script>
-</body>
-</html>
+    function generateId() {
+        return Date.now() + Math.random().toString(36).substr(2, 9);
+    }
+
+    // Keep user online
+    setInterval(() => {
+        if (currentUser) {
+            fetch('/api/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({...currentUser, lastSeen: Date.now()})
+            }).catch(error => console.error('Failed to update user status:', error));
+        }
+    }, 30000);
+
+    // Clean up on page unload
+    window.addEventListener('beforeunload', () => {
+        if (currentUser) {
+            // Send offline status (though it may not complete)
+            fetch('/api/users?offline=true', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(currentUser)
+            });
+        }
+    });
+
+    window.addEventListener('load', init);
+</script>

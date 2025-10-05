@@ -1,3 +1,4 @@
+// Share the same message storage across all API endpoints
 let messages = [];
 let users = new Map();
 
@@ -12,13 +13,14 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET') {
         const { lastCheck, userId } = req.query;
+        const lastCheckTime = parseInt(lastCheck) || 0;
         
         // Update user's last seen
         if (userId) {
             users.set(userId, Date.now());
         }
         
-        // Clean up old users
+        // Clean up old users (2 minutes offline)
         const now = Date.now();
         for (let [uid, lastSeen] of users.entries()) {
             if (now - lastSeen > 120000) {
@@ -26,7 +28,8 @@ export default async function handler(req, res) {
             }
         }
         
-        const newMessages = messages.filter(msg => msg.timestamp > parseInt(lastCheck));
+        // Get new messages since last check
+        const newMessages = messages.filter(msg => msg.timestamp > lastCheckTime);
         const onlineUsers = Array.from(users.keys());
         
         return res.status(200).json({

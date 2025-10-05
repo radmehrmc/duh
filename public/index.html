@@ -393,9 +393,7 @@
 <script>
     let currentUser = null;
     let messages = [];
-    let onlineUsers = [];
-    let lastMessageId = 0;
-    let pollInterval = null;
+    let lastCheck = 0;
 
     // Initialize
     function init() {
@@ -415,7 +413,7 @@
             }
         });
 
-        // Load any saved user
+        // Try to load saved user
         const savedUser = localStorage.getItem('chat_user');
         if (savedUser) {
             currentUser = JSON.parse(savedUser);
@@ -423,7 +421,7 @@
         }
     }
 
-    async function login() {
+    function login() {
         const username = document.getElementById('username').value.trim();
         const avatar = document.querySelector('.avatar-option.selected').dataset.avatar;
         
@@ -431,49 +429,26 @@
             currentUser = {
                 name: username,
                 avatar: avatar,
-                id: generateId(),
-                lastSeen: Date.now()
+                id: Date.now().toString()
             };
             
             localStorage.setItem('chat_user', JSON.stringify(currentUser));
             showApp();
-            
-            // Start ULTRA FAST polling immediately
-            startUltraPolling();
-            
-            // Add join message
-            setTimeout(() => {
-                addSystemMessage(`${username} joined the chat`);
-            }, 1000);
         }
     }
 
     function showApp() {
         document.getElementById('loginContainer').style.display = 'none';
         document.getElementById('appContainer').style.display = 'flex';
-        loadInitialData();
+        
+        // Load existing messages from localStorage
+        loadMessages();
+        
+        // Start checking for new messages
+        setInterval(checkForNewMessages, 1000);
     }
 
-    async function loadInitialData() {
-        try {
-            const response = await fetch('/api/messages');
-            const data = await response.json();
-            messages = data.messages || [];
-            onlineUsers = data.onlineUsers || [];
-            
-            displayMessages();
-            updateOnlineUsers();
-            
-            // Set last message ID for polling
-            if (messages.length > 0) {
-                lastMessageId = Math.max(...messages.map(m => m.id));
-            }
-        } catch (error) {
-            console.error('Failed to load messages:', error);
-        }
-    }
-
-    async function sendMessage() {
+    function sendMessage() {
         const input = document.getElementById('messageInput');
         const text = input.value.trim();
         
@@ -483,24 +458,40 @@
                 user: currentUser.name,
                 avatar: currentUser.avatar,
                 text: text,
-                timestamp: Date.now(),
-                userId: currentUser.id
+                timestamp: Date.now()
             };
 
-            // IMMEDIATELY show the message
+            // Save to localStorage
+            saveMessage(message);
+            
+            // Show immediately
             addMessageToUI(message);
-            messages.push(message);
             
             input.value = '';
-            input.style.height = 'auto';
-
-            // Send to server in background
-            fetch('/api/messages', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(message)
-            }).catch(error => console.error('Send failed:', error));
         }
+    }
+
+    function saveMessage(message) {
+        // Get existing messages
+        let allMessages = JSON.parse(localStorage.getItem('chat_messages') || '[]');
+        
+        // Add new message
+        allMessages.push(message);
+        
+        // Keep only last 100 messages
+        if (allMessages.length > 100) {
+            allMessages = allMessages.slice(-100);
+        }
+        
+        // Save back to localStorage
+        localStorage.setItem('chat_messages', JSON.stringify(allMessages));
+    }
+
+    function loadMessages() {
+        const allMessages = JSON.parse(localStorage.getItem('chat_messages') || '[]');
+        messages = allMessages;
+        
+        displayMessages();
     }
 
     function displayMessages() {
@@ -521,9 +512,7 @@
         const container = document.getElementById('chatMessages');
         
         // Clear welcome message if it exists
-        if (container.children.length === 1 && 
-            (container.children[0].textContent.includes('Loading') || 
-             container.children[0].textContent.includes('No messages'))) {
+        if (container.children.length === 1 && container.children[0].textContent.includes('No messages')) {
             container.innerHTML = '';
         }
         
@@ -549,108 +538,51 @@
         container.scrollTop = container.scrollHeight;
     }
 
-    function addSystemMessage(text) {
-        const message = {
-            id: Date.now(),
-            user: 'System',
-            avatar: '🤖',
-            text: text,
-            timestamp: Date.now(),
-            isSystem: true
-        };
+    function checkForNewMessages() {
+        // Just reload from localStorage every second
+        const allMessages = JSON.parse(localStorage.getItem('chat_messages') || '[]');
         
-        addMessageToUI(message);
-        messages.push(message);
-        
-        // Also send to server
-        fetch('/api/messages', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(message)
-        }).catch(error => console.error('System message failed:', error));
+        // If messages changed, update UI
+        if (allMessages.length !== messages.length) {
+            messages = allMessages;
+            displayMessages();
+        }
     }
 
-    function updateOnlineUsers() {
-        const container = document.getElementById('onlineMembers');
-        const countElement = document.getElementById('onlineCount');
-        
-        container.innerHTML = '';
-        countElement.textContent = onlineUsers.length;
-        
-        // Add current user first
-        const userElement = document.createElement('div');
-        userElement.className = 'member-item';
-        userElement.innerHTML = `
-            <div class="member-avatar">${currentUser.avatar}</div>
-            <div>${currentUser.name} (You)</div>
-            <div class="member-status"></div>
-        `;
-        container.appendChild(userElement);
-        
-        // Add other users
-        onlineUsers.forEach(user => {
-            if (user.id !== currentUser.id) {
-                const userElement = document.createElement('div');
-                userElement.className = 'member-item';
-                userElement.innerHTML = `
-                    <div class="member-avatar">${user.avatar}</div>
-                    <div>${user.name}</div>
-                    <div class="member-status"></div>
-                `;
-                container.appendChild(userElement);
-            }
-        });
-    }
-
-    // ULTRA FAST POLLING - CHECKS EVERY 500ms!
-    function startUltraPolling() {
-        if (pollInterval) clearInterval(pollInterval);
-        
-        pollInterval = setInterval(async () => {
-            if (!currentUser) return;
-            
-            try {
-                const response = await fetch(`/api/updates?lastId=${lastMessageId}&userId=${currentUser.id}`);
-                const data = await response.json();
+    // Simulate other users (for demo)
+    function simulateOtherUsers() {
+        if (Math.random() < 0.3) { // 30% chance every 10 seconds
+            setTimeout(() => {
+                const demoUsers = [
+                    { name: 'Alex', avatar: '😊' },
+                    { name: 'Sam', avatar: '🤖' },
+                    { name: 'Taylor', avatar: '🎮' }
+                ];
+                const user = demoUsers[Math.floor(Math.random() * demoUsers.length)];
+                const responses = ['Hello!', 'How are you?', 'Nice chat!', 'Anyone here?', 'Testing...'];
                 
-                // Update online users
-                if (data.onlineUsers) {
-                    onlineUsers = data.onlineUsers;
-                    updateOnlineUsers();
+                const message = {
+                    id: Date.now(),
+                    user: user.name,
+                    avatar: user.avatar,
+                    text: responses[Math.floor(Math.random() * responses.length)],
+                    timestamp: Date.now()
+                };
+                
+                saveMessage(message);
+                
+                // Only show if we're not the one who sent it
+                if (currentUser.name !== user.name) {
+                    addMessageToUI(message);
                 }
-                
-                // Add new messages
-                if (data.newMessages && data.newMessages.length > 0) {
-                    data.newMessages.forEach(newMsg => {
-                        // Don't add duplicates
-                        if (!messages.some(msg => msg.id === newMsg.id)) {
-                            addMessageToUI(newMsg);
-                            messages.push(newMsg);
-                            lastMessageId = Math.max(lastMessageId, newMsg.id);
-                        }
-                    });
-                }
-                
-            } catch (error) {
-                console.error('Polling error:', error);
-            }
-        }, 500); // POLL EVERY 500ms - SUPER FAST!
+            }, Math.random() * 5000);
+        }
         
-        // Also update user status every 10 seconds
-        setInterval(() => {
-            if (currentUser) {
-                fetch('/api/users', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({...currentUser, lastSeen: Date.now()})
-                }).catch(() => {});
-            }
-        }, 10000);
+        setTimeout(simulateOtherUsers, 10000);
     }
 
-    function generateId() {
-        return Date.now() + Math.random().toString(36).substr(2, 9);
-    }
+    // Start simulating other users after login
+    setTimeout(simulateOtherUsers, 5000);
 
     window.addEventListener('load', init);
 </script>

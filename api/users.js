@@ -1,3 +1,4 @@
+// Share the same user storage
 let users = new Map();
 
 export default async function handler(req, res) {
@@ -12,10 +13,17 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
         try {
             const user = await req.body;
-            users.set(user.id, {
-                ...user,
-                lastSeen: Date.now()
-            });
+            
+            if (req.query.offline) {
+                // Remove user if they're going offline
+                users.delete(user.id);
+            } else {
+                // Update or add user
+                users.set(user.id, {
+                    ...user,
+                    lastSeen: Date.now()
+                });
+            }
             
             return res.status(200).json({ success: true });
         } catch (error) {
@@ -24,10 +32,10 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET') {
-        // Clean up old users
+        // Clean up old users (2 minutes offline)
         const now = Date.now();
         for (let [userId, user] of users.entries()) {
-            if (now - user.lastSeen > 120000) { // 2 minutes
+            if (now - user.lastSeen > 120000) {
                 users.delete(userId);
             }
         }

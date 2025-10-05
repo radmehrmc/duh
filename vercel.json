@@ -1,15 +1,9 @@
 {
   "version": 2,
   "builds": [
-    { "src": "api/messages.js", "use": "@vercel/node" },
-    { "src": "api/users.js", "use": "@vercel/node" },
-    { "src": "api/updates.js", "use": "@vercel/node" },
     { "src": "public/**/*", "use": "@vercel/static" }
   ],
   "routes": [
-    { "src": "/api/messages", "dest": "/api/messages.js" },
-    { "src": "/api/users", "dest": "/api/users.js" },
-    { "src": "/api/updates", "dest": "/api/updates.js" },
     { "src": "/(.*)", "dest": "/public/$1" }
   ]
 }

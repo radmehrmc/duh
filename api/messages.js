@@ -1,5 +1,6 @@
-// Vercel Serverless API endpoint
+// Vercel Serverless API endpoint for messages
 const messages = [];
+const onlineUsers = [];
 
 export default function handler(req, res) {
   // Set CORS headers
@@ -22,14 +23,31 @@ export default function handler(req, res) {
       timestamp: new Date().toISOString()
     });
     
-    // Keep only last 100 messages
-    if (messages.length > 100) {
+    // Keep only last 200 messages
+    if (messages.length > 200) {
       messages.shift();
+    }
+    
+    // Update online users for join messages
+    if (message.isSystem && message.text.includes('joined')) {
+      const userName = message.text.replace(' joined the chat', '');
+      if (!onlineUsers.find(u => u.name === userName)) {
+        onlineUsers.push({
+          name: userName,
+          avatar: '👤',
+          id: Date.now().toString(),
+          lastSeen: new Date().toISOString()
+        });
+      }
     }
     
     res.status(200).json({ success: true });
   } 
   else if (req.method === 'GET') {
-    res.status(200).json(messages);
+    // Return messages and online users
+    res.status(200).json({
+      messages: messages,
+      onlineUsers: onlineUsers
+    });
   }
 }

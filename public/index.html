@@ -393,9 +393,9 @@
 <script>
     let currentUser = null;
     let messages = [];
-    let onlineUsers = new Set();
-    let lastMessageCheck = 0;
-    let isPolling = false;
+    let onlineUsers = [];
+    let lastMessageId = 0;
+    let pollInterval = null;
 
     // Initialize
     function init() {
@@ -438,22 +438,39 @@
             localStorage.setItem('chat_user', JSON.stringify(currentUser));
             showApp();
             
-            // Add user to online list
-            await fetch('/api/users', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(currentUser)
-            });
+            // Start ULTRA FAST polling immediately
+            startUltraPolling();
             
-            // Start polling for updates
-            startPolling();
+            // Add join message
+            setTimeout(() => {
+                addSystemMessage(`${username} joined the chat`);
+            }, 1000);
         }
     }
 
     function showApp() {
         document.getElementById('loginContainer').style.display = 'none';
         document.getElementById('appContainer').style.display = 'flex';
-        loadMessages();
+        loadInitialData();
+    }
+
+    async function loadInitialData() {
+        try {
+            const response = await fetch('/api/messages');
+            const data = await response.json();
+            messages = data.messages || [];
+            onlineUsers = data.onlineUsers || [];
+            
+            displayMessages();
+            updateOnlineUsers();
+            
+            // Set last message ID for polling
+            if (messages.length > 0) {
+                lastMessageId = Math.max(...messages.map(m => m.id));
+            }
+        } catch (error) {
+            console.error('Failed to load messages:', error);
+        }
     }
 
     async function sendMessage() {
@@ -462,7 +479,7 @@
         
         if (text && currentUser) {
             const message = {
-                id: generateId(),
+                id: Date.now(),
                 user: currentUser.name,
                 avatar: currentUser.avatar,
                 text: text,
@@ -470,38 +487,19 @@
                 userId: currentUser.id
             };
 
-            try {
-                const response = await fetch('/api/messages', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(message)
-                });
-                
-                if (response.ok) {
-                    input.value = '';
-                    input.style.height = 'auto';
-                    
-                    // Immediately add the message to UI (optimistic update)
-                    addMessageToUI(message);
-                    messages.push(message);
-                }
-            } catch (error) {
-                console.error('Failed to send message:', error);
-            }
-        }
-    }
-
-    async function loadMessages() {
-        try {
-            const response = await fetch('/api/messages');
-            const data = await response.json();
-            messages = data.messages || [];
-            onlineUsers = new Set(data.onlineUsers || []);
+            // IMMEDIATELY show the message
+            addMessageToUI(message);
+            messages.push(message);
             
-            displayMessages();
-            updateOnlineUsers();
-        } catch (error) {
-            console.error('Failed to load messages:', error);
+            input.value = '';
+            input.style.height = 'auto';
+
+            // Send to server in background
+            fetch('/api/messages', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(message)
+            }).catch(error => console.error('Send failed:', error));
         }
     }
 
@@ -517,8 +515,6 @@
         messages.forEach(message => {
             addMessageToUI(message);
         });
-        
-        container.scrollTop = container.scrollHeight;
     }
 
     function addMessageToUI(message) {
@@ -553,93 +549,108 @@
         container.scrollTop = container.scrollHeight;
     }
 
+    function addSystemMessage(text) {
+        const message = {
+            id: Date.now(),
+            user: 'System',
+            avatar: '🤖',
+            text: text,
+            timestamp: Date.now(),
+            isSystem: true
+        };
+        
+        addMessageToUI(message);
+        messages.push(message);
+        
+        // Also send to server
+        fetch('/api/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(message)
+        }).catch(error => console.error('System message failed:', error));
+    }
+
     function updateOnlineUsers() {
         const container = document.getElementById('onlineMembers');
         const countElement = document.getElementById('onlineCount');
         
         container.innerHTML = '';
-        countElement.textContent = onlineUsers.size;
+        countElement.textContent = onlineUsers.length;
         
-        onlineUsers.forEach(userId => {
-            const userElement = document.createElement('div');
-            userElement.className = 'member-item';
-            userElement.innerHTML = `
-                <div class="member-avatar">👤</div>
-                <div>User ${userId.slice(-4)}</div>
-                <div class="member-status"></div>
-            `;
-            container.appendChild(userElement);
+        // Add current user first
+        const userElement = document.createElement('div');
+        userElement.className = 'member-item';
+        userElement.innerHTML = `
+            <div class="member-avatar">${currentUser.avatar}</div>
+            <div>${currentUser.name} (You)</div>
+            <div class="member-status"></div>
+        `;
+        container.appendChild(userElement);
+        
+        // Add other users
+        onlineUsers.forEach(user => {
+            if (user.id !== currentUser.id) {
+                const userElement = document.createElement('div');
+                userElement.className = 'member-item';
+                userElement.innerHTML = `
+                    <div class="member-avatar">${user.avatar}</div>
+                    <div>${user.name}</div>
+                    <div class="member-status"></div>
+                `;
+                container.appendChild(userElement);
+            }
         });
     }
 
-    async function startPolling() {
-        if (isPolling) return;
-        isPolling = true;
+    // ULTRA FAST POLLING - CHECKS EVERY 500ms!
+    function startUltraPolling() {
+        if (pollInterval) clearInterval(pollInterval);
         
-        const poll = async () => {
+        pollInterval = setInterval(async () => {
             if (!currentUser) return;
             
             try {
-                const response = await fetch(`/api/updates?lastCheck=${lastMessageCheck}&userId=${currentUser.id}`);
+                const response = await fetch(`/api/updates?lastId=${lastMessageId}&userId=${currentUser.id}`);
                 const data = await response.json();
                 
-                if (data.newMessages && data.newMessages.length > 0) {
-                    // Only add messages we haven't seen yet
-                    const newMessages = data.newMessages.filter(newMsg => 
-                        !messages.some(existingMsg => existingMsg.id === newMsg.id)
-                    );
-                    
-                    if (newMessages.length > 0) {
-                        newMessages.forEach(msg => {
-                            addMessageToUI(msg);
-                            messages.push(msg);
-                        });
-                        lastMessageCheck = Date.now();
-                    }
-                }
-                
+                // Update online users
                 if (data.onlineUsers) {
-                    onlineUsers = new Set(data.onlineUsers);
+                    onlineUsers = data.onlineUsers;
                     updateOnlineUsers();
                 }
+                
+                // Add new messages
+                if (data.newMessages && data.newMessages.length > 0) {
+                    data.newMessages.forEach(newMsg => {
+                        // Don't add duplicates
+                        if (!messages.some(msg => msg.id === newMsg.id)) {
+                            addMessageToUI(newMsg);
+                            messages.push(newMsg);
+                            lastMessageId = Math.max(lastMessageId, newMsg.id);
+                        }
+                    });
+                }
+                
             } catch (error) {
                 console.error('Polling error:', error);
             }
-            
-            // Continue polling
-            setTimeout(poll, 1000); // Poll every 1 second for real-time feel
-        };
+        }, 500); // POLL EVERY 500ms - SUPER FAST!
         
-        // Start polling
-        poll();
+        // Also update user status every 10 seconds
+        setInterval(() => {
+            if (currentUser) {
+                fetch('/api/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({...currentUser, lastSeen: Date.now()})
+                }).catch(() => {});
+            }
+        }, 10000);
     }
 
     function generateId() {
         return Date.now() + Math.random().toString(36).substr(2, 9);
     }
-
-    // Keep user online
-    setInterval(() => {
-        if (currentUser) {
-            fetch('/api/users', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({...currentUser, lastSeen: Date.now()})
-            }).catch(error => console.error('Failed to update user status:', error));
-        }
-    }, 30000);
-
-    // Clean up on page unload
-    window.addEventListener('beforeunload', () => {
-        if (currentUser) {
-            // Send offline status (though it may not complete)
-            fetch('/api/users?offline=true', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(currentUser)
-            });
-        }
-    });
 
     window.addEventListener('load', init);
 </script>

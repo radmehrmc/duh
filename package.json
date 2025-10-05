@@ -1,11 +1,5 @@
 {
   "name": "discord-chat",
   "version": "1.0.0",
-  "description": "Simple Discord-style chat",
-  "scripts": {
-    "dev": "vercel dev"
-  },
-  "dependencies": {
-    "@vercel/node": "^2.0.0"
-  }
+  "description": "Simple chat app"
 }

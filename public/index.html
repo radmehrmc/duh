@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>24/7 Vercel Chat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: #5865f2;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            opacity: 0.9;
+        }
+
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 70vh;
+        }
+
+        #loginScreen {
+            padding: 40px;
+            text-align: center;
+        }
+
+        .login-form {
+            max-width: 300px;
+            margin: 0 auto;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            background: #5865f2;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .btn:hover {
+            background: #4752c4;
+        }
+
+        #chatScreen {
+            display: none;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .messages-container {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            padding: 12px;
+            border-radius: 10px;
+            max-width: 70%;
+        }
+
+        .message.own {
+            background: #5865f2;
+            color: white;
+            margin-left: auto;
+            border-bottom-right-radius: 2px;
+        }
+
+        .message.other {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-bottom-left-radius: 2px;
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .message.own .message-header {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .message.other .message-header {
+            color: #666;
+        }
+
+        .message-sender {
+            font-weight: 600;
+        }
+
+        .message-time {
+            font-size: 12px;
+        }
+
+        .message-text {
+            word-wrap: break-word;
+        }
+
+        .chat-input-container {
+            padding: 15px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+        }
+
+        #messageInput {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+
+        .online-users {
+            background: #f8f9fa;
+            padding: 15px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .online-users h3 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .users-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .user-tag {
+            background: #5865f2;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 14px;
+        }
+
+        .user-tag.own {
+            background: #28a745;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Vercel Chat</h1>
+            <p>Real-time chat that works 24/7</p>
+        </div>
+
+        <div class="chat-container">
+            <!-- Login Screen -->
+            <div id="loginScreen">
+                <div class="login-form">
+                    <h2>Join the Chat</h2>
+                    <p style="margin: 20px 0; color: #666;">Enter your name to start chatting</p>
+                    
+                    <div class="form-group">
+                        <label for="username">Your Name</label>
+                        <input type="text" id="username" placeholder="Enter your display name">
+                    </div>
+                    
+                    <button class="btn" onclick="login()">Join Chat</button>
+                </div>
+            </div>
+
+            <!-- Chat Screen -->
+            <div id="chatScreen">
+                <div class="online-users">
+                    <h3>Online Users</h3>
+                    <div class="users-list" id="usersList"></div>
+                </div>
+
+                <div class="messages-container" id="messagesContainer">
+                    <!-- Messages will appear here -->
+                </div>
+
+                <div class="chat-input-container">
+                    <input type="text" id="messageInput" placeholder="Type your message...">
+                    <button class="btn" onclick="sendMessage()">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = '';
+        let messagePollInterval;
+
+        function login() {
+            const username = document.getElementById('username').value.trim();
+            if (username) {
+                currentUser = username;
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('chatScreen').style.display = 'flex';
+                
+                // Add user to online list
+                addUserToOnlineList(username);
+                
+                // Start polling for messages
+                startMessagePolling();
+                
+                // Load existing messages
+                loadMessages();
+                
+                // Send join notification
+                sendMessage(`${username} joined the chat`, true);
+            } else {
+                alert('Please enter your name');
+            }
+        }
+
+        function sendMessage(text = null, isSystem = false) {
+            const messageText = text || document.getElementById('messageInput').value.trim();
+            
+            if (messageText) {
+                const message = {
+                    user: isSystem ? 'System' : currentUser,
+                    text: messageText,
+                    timestamp: new Date().toISOString(),
+                    isSystem: isSystem
+                };
+                
+                fetch('/api/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(message)
+                });
+                
+                if (!isSystem) {
+                    document.getElementById('messageInput').value = '';
+                }
+            }
+        }
+
+        async function loadMessages() {
+            try {
+                const response = await fetch('/api/messages');
+                const messages = await response.json();
+                
+                const messagesContainer = document.getElementById('messagesContainer');
+                messagesContainer.innerHTML = '';
+                
+                messages.forEach(message => {
+                    addMessageToUI(message);
+                });
+                
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            } catch (error) {
+                console.error('Error loading messages:', error);
+            }
+        }
+
+        function addMessageToUI(message) {
+            const messagesContainer = document.getElementById('messagesContainer');
+            const messageElement = document.createElement('div');
+            
+            if (message.isSystem) {
+                messageElement.className = 'message system';
+                messageElement.style.cssText = 'text-align: center; color: #666; font-style: italic; max-width: 100%; background: none; border: none;';
+                messageElement.innerHTML = `<em>${message.text}</em>`;
+            } else {
+                const isOwn = message.user === currentUser;
+                messageElement.className = `message ${isOwn ? 'own' : 'other'}`;
+                
+                const time = new Date(message.timestamp).toLocaleTimeString([], { 
+                    hour: '2-digit', minute: '2-digit' 
+                });
+                
+                messageElement.innerHTML = `
+                    <div class="message-header">
+                        <span class="message-sender">${message.user}</span>
+                        <span class="message-time">${time}</span>
+                    </div>
+                    <div class="message-text">${message.text}</div>
+                `;
+            }
+            
+            messagesContainer.appendChild(messageElement);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function addUserToOnlineList(username) {
+            const usersList = document.getElementById('usersList');
+            const userElement = document.createElement('span');
+            userElement.className = `user-tag ${username === currentUser ? 'own' : ''}`;
+            userElement.textContent = username;
+            usersList.appendChild(userElement);
+        }
+
+        function startMessagePolling() {
+            // Poll for new messages every 2 seconds
+            messagePollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/api/messages?lastCheck=' + Date.now());
+                    const messages = await response.json();
+                    
+                    const messagesContainer = document.getElementById('messagesContainer');
+                    const currentMessageCount = messagesContainer.children.length;
+                    
+                    // Only add new messages
+                    if (messages.length > currentMessageCount) {
+                        const newMessages = messages.slice(currentMessageCount);
+                        newMessages.forEach(message => {
+                            addMessageToUI(message);
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error polling messages:', error);
+                }
+            }, 2000);
+        }
+
+        // Allow sending with Enter key
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Prevent leaving without warning
+        window.addEventListener('beforeunload', function(e) {
+            if (currentUser) {
+                sendMessage(`${currentUser} left the chat`, true);
+            }
+        });
+    </script>
+</body>
+</html>

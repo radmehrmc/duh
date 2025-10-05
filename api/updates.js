@@ -1,6 +1,25 @@
-// Share the same message storage across all API endpoints
-let messages = [];
-let users = new Map();
+import fs from 'fs';
+import path from 'path';
+
+const dataFile = '/tmp/chat_data.json';
+
+function readData() {
+    try {
+        const data = fs.readFileSync(dataFile, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        return { messages: [], users: [], lastCleanup: Date.now() };
+    }
+}
+
+function writeData(data) {
+    try {
+        fs.writeFileSync(dataFile, JSON.stringify(data));
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
 
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -12,29 +31,30 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET') {
-        const { lastCheck, userId } = req.query;
-        const lastCheckTime = parseInt(lastCheck) || 0;
+        const { lastId, userId } = req.query;
+        const lastIdNum = parseInt(lastId) || 0;
+        
+        const data = readData();
+        const now = Date.now();
         
         // Update user's last seen
         if (userId) {
-            users.set(userId, Date.now());
-        }
-        
-        // Clean up old users (2 minutes offline)
-        const now = Date.now();
-        for (let [uid, lastSeen] of users.entries()) {
-            if (now - lastSeen > 120000) {
-                users.delete(uid);
+            const userIndex = data.users.findIndex(u => u.id === userId);
+            if (userIndex !== -1) {
+                data.users[userIndex].lastSeen = now;
             }
+            writeData(data);
         }
         
-        // Get new messages since last check
-        const newMessages = messages.filter(msg => msg.timestamp > lastCheckTime);
-        const onlineUsers = Array.from(users.keys());
+        // Clean up old users
+        data.users = data.users.filter(user => now - user.lastSeen < 120000);
+        
+        // Get new messages since last ID
+        const newMessages = data.messages.filter(msg => msg.id > lastIdNum);
         
         return res.status(200).json({
             newMessages,
-            onlineUsers
+            onlineUsers: data.users
         });
     }
 

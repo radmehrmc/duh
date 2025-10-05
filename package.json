@@ -1,12 +1,11 @@
 {
-  "name": "dihcordt",
+  "name": "discord-chat",
   "version": "1.0.0",
-  "description": "sybau",
+  "description": "Simple Discord-style chat",
   "scripts": {
-    "dev": "MONSTER dev"
+    "dev": "vercel dev"
   },
   "dependencies": {
-    "@vercel/node": "^2.0.0",
-    "multer": "^1.4.5-lts.1"
+    "@vercel/node": "^2.0.0"
   }
 }

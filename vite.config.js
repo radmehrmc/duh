@@ -1,12 +1,5 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  build: {
-    target: 'esnext',
-    rollupOptions: {
-      input: {
-        main: './index.html'
-      }
-    }
-  }
+  // No explicit rollup inputs, letting Vite find index.html naturally
 });

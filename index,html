@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chat — #general</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" />
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { 
+    getDatabase, ref, push, onChildAdded, onValue, set, remove, serverTimestamp, query, limitToLast, orderByChild, onDisconnect, get 
+  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL
+};
+
+  // ── Bootstrap ──────────────────────────────────────────────
+  const app = initializeApp(firebaseConfig);
+  const db  = getDatabase(app);
+
+  const AVLIST   = ['🦊','🐉','🐙','🤖','👾'];
+  const AVCOLORS = ['#f0a732','#5865f2','#57c7e3','#e74c6b','#23a559'];
+  const QUICK    = ['👍','❤️','😂','🔥','😮'];
+  const MAX_MSGS = 150;
+
+  let me = null;
+
+  // ── DOM helpers ────────────────────────────────────────────
+  const $ = id => document.getElementById(id);
+
+  // ── Avatar picker ──────────────────────────────────────────
+  let selAv = null;
+  AVLIST.forEach((em, i) => {
+    const b = document.createElement('button');
+    b.className = 'av-btn'; b.textContent = em; b.type = 'button';
+    b.onclick = () => {
+      document.querySelectorAll('.av-btn').forEach(x => x.classList.remove('sel'));
+      b.classList.add('sel'); selAv = i; checkJoin();
+    };
+    $('av-grid').appendChild(b);
+  });
+
+  $('uname').addEventListener('input', checkJoin);
+  $('uname').addEventListener('keydown', e => { if (e.key === 'Enter') $('join-btn').click(); });
+
+  function checkJoin() {
+    $('join-btn').disabled = !($('uname').value.trim().length >= 2 && selAv !== null);
+  }
+
+  // ── Join ───────────────────────────────────────────────────
+  $('join-btn').onclick = async () => {
+    const name = $('uname').value.trim();
+    if (!name || selAv === null) return;
+
+    me = {
+      id:     'u_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      name,
+      avIdx:  selAv,
+      color:  AVCOLORS[selAv],
+      joined: Date.now()
+    };
+
+    $('setup-screen').style.display = 'none';
+    const cs = $('chat-screen');
+    cs.style.display = 'flex'; cs.style.flexDirection = 'column';
+    cs.style.flex = '1'; cs.style.overflow = 'hidden';
+    $('my-av-sm').textContent  = AVLIST[me.avIdx];
+    $('my-name-sm').textContent = me.name;
+    $('msg-in').disabled = false;
+    $('msg-in').focus();
+
+    setupPresence();
+    listenMessages();
+    listenPresence();
+
+    await sendSystem(`${AVLIST[me.avIdx]} ${name} joined the chat`);
+  };
+
+  // ── Presence ───────────────────────────────────────────────
+  function setupPresence() {
+    const presRef  = ref(db, `presence/${me.id}`);
+    const connRef  = ref(db, '.info/connected');
+
+    onValue(connRef, snap => {
+      if (!snap.val()) return;
+      // Write presence; auto-remove on disconnect
+      set(presRef, {
+        id:    me.id, name: me.name,
+        avIdx: me.avIdx, color: me.color,
+        online: true, typing: false,
+        ts: serverTimestamp()
+      });
+      // Cleaned up the problematic dynamic import here
+      onDisconnect(presRef).remove();
+    });
+
+    // Heartbeat so ts stays fresh
+    setInterval(() => {
+      if (!me) return;
+      set(presRef, {
+        id:    me.id, name: me.name,
+        avIdx: me.avIdx, color: me.color,
+        online: true, typing: me._typing || false,
+        ts: serverTimestamp()
+      });
+    }, 10000);
+  }
+
+  async function setTyping(active) {
+    if (!me) return;
+    me._typing = active;
+    await set(ref(db, `presence/${me.id}/typing`), active);
+  }
+
+  // ── Messages ───────────────────────────────────────────────
+  function listenMessages() {
+    const msgsRef = query(
+      ref(db, 'messages'),
+      orderByChild('ts'),
+      limitToLast(MAX_MSGS)
+    );
+    const seen = new Set();
+    onChildAdded(msgsRef, snap => {
+      const msg = { ...snap.val(), _key: snap.key };
+      if (seen.has(snap.key)) return;
+      seen.add(snap.key);
+      appendMessage(msg);
+    });
+  }
+
+  async function sendMessage(text) {
+    await push(ref(db, 'messages'), {
+      uid:   me.id, name: me.name,
+      avIdx: me.avIdx, color: me.color,
+      text, ts: serverTimestamp(), type: 'msg'
+    });
+  }
+
+  async function sendSystem(text) {
+    await push(ref(db, 'messages'), {
+      uid: 'sys', text, ts: serverTimestamp(), type: 'sys'
+    });
+  }
+
+  // ── Presence listener ─────────────────────────────────────
+  function listenPresence() {
+    onValue(ref(db, 'presence'), snap => {
+      const data = snap.val() || {};
+      const members = Object.values(data).filter(u => u.online);
+      renderMembers(members);
+      const typers = members.filter(u => u.id !== me.id && u.typing);
+      renderTyping(typers);
+    });
+  }
+
+  // ── Reactions ─────────────────────────────────────────────
+  window.doReact = async (msgKey, emoji) => {
+    if (!me) return;
+    const rRef = ref(db, `reactions/${msgKey}/${emoji}/${me.id}`);
+    // Fixed dynamic import dependency error
+    const snap = await get(rRef);
+    if (snap.exists()) await remove(rRef);
+    else await set(rRef, true);
+  };
+
+  // Listen for reaction changes and patch reaction bars
+  onValue(ref(db, 'reactions'), snap => {
+    const all = snap.val() || {};
+    document.querySelectorAll('[data-msgkey]').forEach(el => {
+      const key = el.dataset.msgkey;
+      const reactions = all[key] || {};
+      const bar = el.querySelector('.reactions-bar');
+      if (bar) bar.innerHTML = buildReactionsHTML(key, reactions);
+    });
+  });
+
+  function buildReactionsHTML(msgKey, reactions) {
+    return Object.entries(reactions)
+      .map(([em, users]) => {
+        const count = Object.keys(users).length;
+        if (!count) return '';
+        const mine = me && users[me.id];
+        return `<button class="react-chip${mine ? ' mine' : ''}" onclick="doReact('${msgKey}','${em}')">${em}<span class="rc">${count}</span></button>`;
+      }).join('');
+  }
+
+  // ── Render: append single message ─────────────────────────
+  let prevAuthor = null, prevTime = 0, prevDate = null;
+
+  function appendMessage(msg) {
+    const msgsEl = $('msgs');
+    const atBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
+
+    const d = fmtDate(msg.ts);
+    if (d !== prevDate) {
+      const div = document.createElement('div');
+      div.className = 'date-divider'; div.textContent = d;
+      msgsEl.appendChild(div); prevDate = d; prevAuthor = null;
+    }
+
+    if (msg.type === 'sys') {
+      const el = document.createElement('div');
+      el.className = 'sys'; el.textContent = msg.text;
+      msgsEl.appendChild(el); prevAuthor = null; prevTime = 0;
+      if (atBottom) msgsEl.scrollTop = msgsEl.scrollHeight;
+      return;
+    }
+
+    const grouped = msg.uid === prevAuthor && msg.ts && prevTime && (msg.ts - prevTime) < 420000;
+    const wrap = document.createElement('div');
+    wrap.dataset.msgkey = msg._key;
+
+    const qr = `<div class="quick-reacts">${QUICK.map(e => `<button class="qr" onclick="doReact('${msg._key}','${e}')">${e}</button>`).join('')}</div>`;
+
+    if (!grouped) {
+      wrap.className = 'msg-wrap';
+      wrap.innerHTML = `
+        <div class="msg-av">${AVLIST[msg.avIdx] || '?'}</div>
+        <div class="msg-body">
+          <div class="msg-head">
+            <span class="msg-author" style="color:${msg.color}">${esc(msg.name)}</span>
+            <span class="msg-ts">${fmt(msg.ts)}</span>
+          </div>
+          <div class="msg-text">${esc(msg.text)}</div>
+          <div class="reactions-bar"></div>${qr}
+        </div>`;
+    } else {
+      wrap.className = 'msg-cont';
+      wrap.innerHTML = `
+        <div class="msg-cont-inner">
+          <div class="msg-text">${esc(msg.text)}</div>
+          <div class="reactions-bar"></div>${qr}
+        </div>`;
+    }
+
+    msgsEl.appendChild(wrap);
+    prevAuthor = msg.uid;
+    prevTime   = msg.ts || Date.now();
+
+    if (atBottom) msgsEl.scrollTop = msgsEl.scrollHeight;
+  }
+
+  // ── Render: members sidebar ────────────────────────────────
+  function renderMembers(members) {
+    const mbList = $('mb-list');
+    mbList.innerHTML = '';
+    const sorted = [...members].sort((a, b) => {
+      if (a.id === me?.id) return -1;
+      if (b.id === me?.id) return 1;
+      return a.name.localeCompare(b.name);
+    });
+    $('mc').textContent = sorted.length;
+    $('online-pill').textContent = sorted.length + ' online';
+
+    sorted.forEach(u => {
+      const isMe = u.id === me?.id;
+      const row = document.createElement('div');
+      row.className = 'member-row';
+      row.innerHTML = `
+        <div class="av">${AVLIST[u.avIdx] || '?'}<div class="dot"></div></div>
+        <div class="mb-info">
+          <div class="mb-name${isMe ? ' me' : ''}">${esc(u.name)}${isMe ? '<span class="mb-tag">you</span>' : ''}</div>
+          <div class="mb-status">${u.typing && !isMe ? '<span style="color:#57c7e3">typing…</span>' : 'Online'}</div>
+        </div>`;
+      mbList.appendChild(row);
+    });
+  }
+
+  // ── Render: typing indicator ───────────────────────────────
+  function renderTyping(typers) {
+    const row = $('typing-row');
+    if (!typers.length) { row.innerHTML = ''; return; }
+    const names = typers.map(u => `<b>${esc(u.name)}</b>`).join(', ');
+    const verb  = typers.length === 1 ? 'is' : 'are';
+    row.innerHTML = `<div class="typing-text">${names} ${verb} typing<span class="bounce"><span>.</span><span>.</span><span>.</span></span></div>`;
+  }
+
+  // ── Send flow ──────────────────────────────────────────────
+  let typTimer = null;
+
+  async function send() {
+    const text = $('msg-in').value.trim();
+    if (!text || !me) return;
+    $('msg-in').value = '';
+    $('send-btn').className = 'send-btn';
+    clearTimeout(typTimer);
+    await setTyping(false);
+    await sendMessage(text);
+  }
+
+  $('msg-in').addEventListener('input', () => {
+    $('send-btn').className = 'send-btn' + ($('msg-in').value.trim() ? ' active' : '');
+    if (!me) return;
+    clearTimeout(typTimer);
+    if ($('msg-in').value.trim()) setTyping(true);
+    typTimer = setTimeout(() => setTyping(false), 3000);
+  });
+
+  $('msg-in').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  $('send-btn').addEventListener('click', send);
+
+  // ── Helpers ────────────────────────────────────────────────
+  function fmt(t) {
+    if (!t) return '';
+    return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  function fmtDate(t) {
+    if (!t) return 'Today';
+    const d = new Date(t), n = new Date();
+    if (d.toDateString() === n.toDateString()) return 'Today';
+    const y = new Date(n); y.setDate(y.getDate() - 1);
+    if (d.toDateString() === y.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
+  }
+  function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:#111214}
+:root{
+  --bg:#313338;--sidebar:#2b2d31;--header:#2b2d31;--input-bg:#383a40;
+  --msg-hover:#2e3035;--text:#dbdee1;--muted:#949ba4;--accent:#5865f2;
+  --green:#23a559;--border:#1e1f22;--white:#fff;--card:#1e1f22;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:stretch;justify-content:center}
+#app{display:flex;flex-direction:column;width:100%;height:100vh;background:var(--bg);overflow:hidden}
+
+/* ── Setup ── */
+#setup-screen{display:flex;align-items:center;justify-content:center;flex:1}
+.setup-card{background:var(--sidebar);border-radius:16px;padding:40px;width:400px;border:1px solid #3f4147}
+.setup-card h2{color:var(--white);font-size:26px;font-weight:800;margin-bottom:6px;letter-spacing:-.5px}
+.setup-card .sub{color:var(--muted);font-size:14px;margin-bottom:30px}
+.field-label{color:#b5bac1;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px}
+.setup-input{width:100%;background:var(--card);border:1.5px solid #3f4147;border-radius:6px;padding:12px 14px;color:var(--white);font-size:15px;outline:none;transition:border-color .15s;font-family:inherit}
+.setup-input:focus{border-color:var(--accent)}
+.avatar-grid{display:flex;gap:12px;margin:10px 0 28px}
+.av-btn{width:62px;height:62px;border-radius:50%;background:var(--card);border:2.5px solid transparent;font-size:30px;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center}
+.av-btn:hover{background:#2b2d31;border-color:#4f545c}
+.av-btn.sel{border-color:var(--accent);background:#404775}
+.join-btn{width:100%;background:var(--accent);border:none;border-radius:6px;padding:13px;color:var(--white);font-size:15px;font-weight:700;cursor:pointer;transition:background .15s}
+.join-btn:hover:not(:disabled){background:#4752c4}
+.join-btn:active:not(:disabled){transform:scale(.98)}
+.join-btn:disabled{opacity:.35;cursor:not-allowed}
+
+/* ── Chat ── */
+#chat-screen{display:none;flex:1;flex-direction:column;overflow:hidden}
+#top-bar{background:var(--header);height:52px;display:flex;align-items:center;padding:0 18px;border-bottom:1px solid var(--border);flex-shrink:0;gap:10px}
+.channel-name{color:var(--white);font-size:16px;font-weight:700;display:flex;align-items:center;gap:6px}
+.channel-name .hash{color:var(--muted);font-size:22px;font-weight:300;line-height:1}
+.sep{width:1px;height:22px;background:#3f4147;margin:0 2px}
+.topic{color:var(--muted);font-size:13px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{background:#404775;color:#c9cdfb;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;white-space:nowrap}
+
+#body{display:flex;flex:1;overflow:hidden}
+
+/* ── Sidebar ── */
+#sidebar{width:230px;background:var(--sidebar);display:flex;flex-direction:column;border-right:1px solid var(--border);flex-shrink:0}
+.sb-label{padding:20px 14px 6px;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px}
+.member-row{display:flex;align-items:center;gap:10px;padding:7px 12px;border-radius:6px;margin:1px 6px;cursor:default;transition:background .1s}
+.member-row:hover{background:#35373c}
+.av{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;position:relative}
+.av .dot{position:absolute;bottom:-1px;right:-1px;width:12px;height:12px;border-radius:50%;background:var(--green);border:3px solid var(--sidebar)}
+.mb-info{min-width:0;flex:1}
+.mb-name{color:#c4c9ce;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mb-name.me{color:var(--white)}
+.mb-tag{background:#404775;color:#c9cdfb;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:5px;vertical-align:1px}
+.mb-status{color:var(--muted);font-size:11px;margin-top:1px}
+#my-info{margin-top:auto;background:#232428;padding:10px 12px;display:flex;align-items:center;gap:10px;border-top:1px solid var(--border);flex-shrink:0}
+.my-av{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+#my-name-sm{color:var(--white);font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.my-status{color:var(--green);font-size:11px;margin-top:1px}
+
+/* ── Messages ── */
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+#msgs{flex:1;overflow-y:auto;padding:0 0 8px}
+#msgs::-webkit-scrollbar{width:6px}
+#msgs::-webkit-scrollbar-thumb{background:#1a1b1e;border-radius:3px}
+
+.welcome-block{padding:28px 20px 20px;border-bottom:1px solid #3f4147;margin-bottom:12px}
+.welcome-block .wh{color:var(--white);font-size:22px;font-weight:800;margin-bottom:5px}
+.welcome-block .ws{color:var(--muted);font-size:14px}
+
+.date-divider{display:flex;align-items:center;justify-content:center;gap:14px;padding:16px 0;color:var(--muted);font-size:12px;font-weight:700}
+.date-divider::before,.date-divider::after{content:'';flex:1;max-width:180px;height:1px;background:#3f4147}
+
+.sys{text-align:center;color:var(--muted);font-size:12px;padding:5px 0;display:flex;align-items:center;justify-content:center;gap:10px}
+.sys::before,.sys::after{content:'';height:1px;background:#2e3035;width:40px}
+
+.msg-wrap{display:flex;gap:14px;padding:3px 20px;transition:background .1s;position:relative}
+.msg-wrap:hover{background:var(--msg-hover)}
+.msg-av{width:42px;height:42px;font-size:25px;flex-shrink:0;align-self:flex-start;margin-top:2px;display:flex;align-items:center;justify-content:center}
+.msg-body{flex:1;min-width:0}
+.msg-head{display:flex;align-items:baseline;gap:8px;margin-bottom:3px}
+.msg-author{font-size:14px;font-weight:700}
+.msg-ts{color:var(--muted);font-size:11px}
+.msg-text{color:var(--text);font-size:14px;line-height:1.6;word-break:break-word;white-space:pre-wrap}
+.msg-cont{padding:1px 20px;transition:background .1s}
+.msg-cont:hover{background:var(--msg-hover)}
+.msg-cont-inner{padding-left:56px}
+
+.reactions-bar{display:flex;gap:4px;margin-top:5px;flex-wrap:wrap;min-height:0}
+.react-chip{background:#2e3035;border:1px solid #3f4147;border-radius:12px;padding:2px 9px;font-size:13px;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:5px;font-family:inherit}
+.react-chip:hover,.react-chip.mine{background:#404775;border-color:var(--accent)}
+.react-chip .rc{color:var(--white);font-size:11px;font-weight:700}
+.quick-reacts{display:none;gap:3px;margin-top:4px;align-items:center}
+.msg-wrap:hover .quick-reacts,.msg-cont:hover .quick-reacts{display:flex}
+.qr{background:#2e3035;border:1px solid #3f4147;border-radius:8px;padding:3px 8px;font-size:15px;cursor:pointer;transition:all .1s;font-family:inherit;line-height:1}
+.qr:hover{background:#404775;border-color:var(--accent)}
+
+/* ── Input ── */
+#typing-row{height:26px;padding:0 20px;display:flex;align-items:center;flex-shrink:0}
+.typing-text{color:var(--muted);font-size:12px}
+.typing-text b{color:#dbdee1;font-weight:700}
+.bounce span{display:inline-block;animation:bop .8s infinite ease-in-out}
+.bounce span:nth-child(2){animation-delay:.12s}
+.bounce span:nth-child(3){animation-delay:.24s}
+@keyframes bop{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-4px)}}
+#input-row{padding:0 16px 18px;flex-shrink:0}
+.input-shell{background:var(--input-bg);border-radius:10px;display:flex;align-items:center;padding:0 14px;gap:12px}
+#msg-in{flex:1;background:transparent;border:none;outline:none;color:var(--white);font-size:15px;padding:14px 0;font-family:inherit}
+#msg-in::placeholder{color:var(--muted)}
+#msg-in:disabled{cursor:not-allowed;opacity:.5}
+.icon-btn{color:var(--muted);font-size:22px;cursor:pointer;transition:color .15s;line-height:1;flex-shrink:0}
+.icon-btn:hover{color:var(--text)}
+.send-btn{background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;padding:5px;border-radius:6px;transition:color .15s;display:flex;align-items:center;line-height:1;flex-shrink:0}
+.send-btn:hover{color:var(--text)}
+.send-btn.active{color:var(--accent)}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="setup-screen">
+    <div class="setup-card">
+      <h2>Join the chat 💬</h2>
+      <p class="sub">Pick a username and avatar — then you're in.</p>
+      <div class="field-label">Username</div>
+      <input class="setup-input" id="uname" type="text" placeholder="e.g. coolperson" maxlength="20" autocomplete="off" spellcheck="false" />
+      <div class="field-label" style="margin-top:22px">Avatar</div>
+      <div class="avatar-grid" id="av-grid"></div>
+      <button class="join-btn" id="join-btn" disabled>Let's go →</button>
+    </div>
+  </div>
+
+  <div id="chat-screen">
+    <div id="top-bar">
+      <div class="channel-name"><span class="hash">#</span>general</div>
+      <div class="sep"></div>
+      <div class="topic">Hang out · chat · vibe ✨</div>
+      <span class="pill" id="online-pill">0 online</span>
+    </div>
+
+    <div id="body">
+      <div id="sidebar">
+        <div class="sb-label">Online — <span id="mc">0</span></div>
+        <div id="mb-list"></div>
+        <div id="my-info">
+          <div class="my-av" id="my-av-sm"></div>
+          <div style="flex:1;min-width:0">
+            <div id="my-name-sm"></div>
+            <div class="my-status">● Online</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="main">
+        <div id="msgs">
+          <div class="welcome-block">
+            <div style="font-size:44px;margin-bottom:10px">#</div>
+            <div class="wh">Welcome to #general</div>
+            <div class="ws">This is the very beginning of this channel. Say hi! 👋</div>
+          </div>
+        </div>
+        <div id="typing-row"></div>
+        <div id="input-row">
+          <div class="input-shell">
+            <i class="ti ti-circle-plus icon-btn" aria-hidden="true"></i>
+            <input id="msg-in" type="text" placeholder="Message #general" maxlength="400" disabled />
+            <i class="ti ti-mood-smile icon-btn" aria-hidden="true"></i>
+            <button class="send-btn" id="send-btn" aria-label="Send"><i class="ti ti-send"></i></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

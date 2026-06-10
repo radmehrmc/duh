@@ -1,7 +1,8 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+// Switch from gstatic CDN URLs to local npm dependencies
+import { initializeApp } from "firebase/app";
 import { 
   getDatabase, ref, push, onChildAdded, onValue, set, remove, serverTimestamp, query, limitToLast, orderByChild, onDisconnect, get 
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+} from "firebase/database";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,

@@ -1,5 +1,12 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'path';
 
 export default defineConfig({
-  // No explicit rollup inputs, letting Vite find index.html naturally
+  root: process.cwd(), // Forces Vite to use the exact execution folder as root
+  build: {
+    outDir: resolve(__dirname, 'dist'),
+    rollupOptions: {
+      input: resolve(__dirname, 'index.html'), // Absolute path resolution
+    },
+  },
 });
